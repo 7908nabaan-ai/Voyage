@@ -72,6 +72,7 @@ export default function App() {
   const [seenQuoteIndices, setSeenQuoteIndices] = useState<number[]>([]);
   const [hasSeenDisclaimer, setHasSeenDisclaimer] = useState(false);
   const [hasSavedSession, setHasSavedSession] = useState(false);
+  const [showQuoteAfterAnswer, setShowQuoteAfterAnswer] = useState(false);
 
   // Check for saved session on mount
   useEffect(() => {
@@ -119,13 +120,36 @@ export default function App() {
     });
   }, []);
 
+  const getRandomQuote = useCallback(() => {
+    // Get a random quote that hasn't been seen yet
+    const unseen = QUOTES.map((q, i) => ({ q, i })).filter(
+      ({ i }) => !seenQuoteIndices.includes(i)
+    );
+    const pool = unseen.length > 0 ? unseen : QUOTES.map((q, i) => ({ q, i }));
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    if (pick) {
+      setCurrentQuote(pick.q);
+      setSeenQuoteIndices((prev) => [...prev, pick.i]);
+      saveState({ seenQuoteIndices: [...seenQuoteIndices, pick.i] });
+    }
+  }, [seenQuoteIndices]);
+
   const handleNext = useCallback(() => {
-    setQuestionIndex((prev) => {
-      const nextIdx = prev + 1;
-      saveState({ questionIndex: nextIdx });
-      return nextIdx;
-    });
-  }, []);
+    const isLastQuestion = questionIndex === QUESTIONS.length - 1;
+    
+    if (isLastQuestion) {
+      // Don't show quote on finish
+      setQuestionIndex((prev) => {
+        const nextIdx = prev + 1;
+        saveState({ questionIndex: nextIdx });
+        return nextIdx;
+      });
+    } else {
+      // Show quote before moving to next question
+      getRandomQuote();
+      setShowQuoteAfterAnswer(true);
+    }
+  }, [questionIndex, getRandomQuote]);
 
   const handleBack = useCallback(() => {
     setQuestionIndex((prev) => {
@@ -142,34 +166,14 @@ export default function App() {
     setPhase('results');
   }, [answers]);
 
-  // Quote interstitial logic: show a quote when transitioning between stages
-  useEffect(() => {
-    if (phase !== 'assessment') return;
-    const currentQuestion = QUESTIONS[questionIndex];
-    if (!currentQuestion) return;
-    const prevQuestion = questionIndex > 0 ? QUESTIONS[questionIndex - 1] : null;
-
-    // Transition from stage 1 -> 2 or stage 2 -> 3
-    if (prevQuestion && prevQuestion.stage !== currentQuestion.stage) {
-      // Find a quote for the previous stage that hasn't been seen
-      const prevStageQuotes = QUOTES.map((q, i) => ({ q, i })).filter(
-        ({ q }) => getQuoteStage(q) === prevQuestion.stage
-      );
-      const unseen = prevStageQuotes.filter(({ i }) => !seenQuoteIndices.includes(i));
-      const pool = unseen.length > 0 ? unseen : prevStageQuotes;
-      const pick = pool[Math.floor(Math.random() * pool.length)];
-      if (pick) {
-        setCurrentQuote(pick.q);
-        setSeenQuoteIndices((prev) => [...prev, pick.i]);
-        saveState({ seenQuoteIndices: [...seenQuoteIndices, pick.i] });
-        setPhase('quote');
-      }
-    }
-  }, [questionIndex, phase, seenQuoteIndices]);
-
   const handleQuoteContinue = useCallback(() => {
     setCurrentQuote(null);
-    setPhase('assessment');
+    setShowQuoteAfterAnswer(false);
+    setQuestionIndex((prev) => {
+      const nextIdx = prev + 1;
+      saveState({ questionIndex: nextIdx });
+      return nextIdx;
+    });
   }, []);
 
   const handleRetake = useCallback(() => {
@@ -181,6 +185,7 @@ export default function App() {
     setSeenQuoteIndices([]);
     setVoyage(null);
     setHasSavedSession(false);
+    setShowQuoteAfterAnswer(false);
     setPhase('identity');
   }, []);
 
@@ -225,7 +230,7 @@ export default function App() {
       {showLangToggle && (
         <button
           onClick={toggleLang}
-          className="fixed top-3 right-3 z-50 flex items-center gap-1.5 bg-stone-900/70 backdrop-blur-sm border border-amber-900/40 text-amber-200/70 hover:text-amber-100 text-xs px-3 py-1.5 rounded-full transition-all hover:border-amber-700/50"
+          className="fixed top-3 right-3 z-50 flex items-center gap-1.5 bg-stone-900/70 backdrop-blur-sm border border-amber-900/40 text-amber-200/70 hover:text-amber-100 text-xs px-3 py-1.5 rounded-lg transition-colors"
         >
           <Globe className="w-3.5 h-3.5" />
           {lang === 'en' ? 'Dhivehi' : 'English'}
@@ -270,7 +275,7 @@ export default function App() {
         <IdentityScreen lang={lang} onSubmit={handleIdentitySubmit} />
       )}
 
-      {phase === 'assessment' && (
+      {phase === 'assessment' && !showQuoteAfterAnswer && (
         <QuestionCard
           lang={lang}
           questionIndex={questionIndex}
@@ -282,7 +287,7 @@ export default function App() {
         />
       )}
 
-      {phase === 'quote' && currentQuote && (
+      {phase === 'assessment' && showQuoteAfterAnswer && currentQuote && (
         <QuoteScreen lang={lang} quote={currentQuote} onContinue={handleQuoteContinue} />
       )}
 
@@ -301,12 +306,4 @@ export default function App() {
       )}
     </div>
   );
-}
-
-// Map quotes to their stage based on position in the QUOTES array
-function getQuoteStage(quote: PirateQuote): number {
-  const idx = QUOTES.indexOf(quote);
-  if (idx < 12) return 1;
-  if (idx < 24) return 2;
-  return 3;
 }
